@@ -1,6 +1,5 @@
 require 'csv'
 require 'net/http'
-require 'pry'
 require 'json'
 
 class Calculator
