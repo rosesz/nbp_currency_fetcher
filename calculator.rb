@@ -1,5 +1,7 @@
 require 'csv'
 require 'net/http'
+require 'pry'
+require 'json'
 
 class Calculator
   SEPARATOR = ';'
@@ -13,27 +15,20 @@ class Calculator
   def prepare_data
     data = CSV.read('input.csv', { col_sep: SEPARATOR })
 
-    data.each do |row|
-      name = row[0]
-      amount = row[1]
-      currency = row[2]
-      date = Date.parse(row[3])
-      tax_taken_percentage = row[4]
-
-      puts currency_date(date).to_s
-
-      uri = URI("http://api.nbp.pl/api/exchangerates/rates/A/#{currency}/#{currency_date(date).to_s}")
-
-      response = Net::HTTP.get_response(uri)
-
-      puts response.body
+    CSV.open('output.csv','wb') do |csv|
+      data.each do |row|
+        csv << prepare_row(row)
+      end
     end
+
+  rescue Errno::ENOENT
+    puts 'No valid input.csv file present'
   end
 
   private
 
   # check what was the first working day before date, based on its weekday number
-  def currency_date(date)
+  def working_date(date)
     offset = case date.wday
       when 2..6 then 1
       when 1 then 3
@@ -41,6 +36,33 @@ class Calculator
     end
 
     date - offset
+  end
+
+  def get_response(currency, date)
+    uri = URI("http://api.nbp.pl/api/exchangerates/rates/A/#{currency}/#{date.to_s}")
+    Net::HTTP.get_response(uri)
+  end
+
+  def prepare_row(row)
+    name  = row[0]
+    amount = row[1]
+    currency = row[2]
+    original_date = Date.parse(row[3])
+    date = working_date(original_date)
+    tax_taken_percentage = row[4]
+
+    response = get_response(currency, date)
+
+    if response.is_a?(Net::HTTPNotFound)
+      # not found probably means public holiday, so try one working day earlier
+      response = get_response(currency, working_date(date - 1))
+    end
+
+    response_body = JSON.parse(response.body)
+
+    exchange_rate = response_body['rates']&.first['mid']
+
+    [name, amount, currency, original_date, tax_taken_percentage, exchange_rate]
   end
 end
 
